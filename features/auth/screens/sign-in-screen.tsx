@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { useToast } from '@/components/toast';
 import { darkTheme, lightTheme } from '@/constants/theme';
 import { ROUTES } from '@/lib/routes';
 
@@ -20,10 +21,12 @@ import {
   SocialButton,
   SocialDivider,
 } from '../components/social-button';
+import { clerkErrorMessage } from '../lib/clerk-error';
 
 export function SignInScreen() {
   const { signIn, errors, fetchStatus } = useSignIn();
   const router = useRouter();
+  const toast = useToast();
   const isDark = useColorScheme() === 'dark';
   const palette = isDark ? darkTheme : lightTheme;
 
@@ -35,10 +38,7 @@ export function SignInScreen() {
     const { error } = await signIn.finalize({
       navigate: ({ session }) => {
         if (session.currentTask) {
-          console.log(
-            'Complete the pending Clerk session task before continuing.',
-            session.currentTask,
-          );
+          toast.info('Action required', 'Finish the pending Clerk session task to continue.');
           return;
         }
 
@@ -47,7 +47,7 @@ export function SignInScreen() {
     });
 
     if (error) {
-      console.error(JSON.stringify(error, null, 2));
+      toast.error('Sign-in failed', clerkErrorMessage(error));
     }
   }
 
@@ -58,7 +58,7 @@ export function SignInScreen() {
     });
 
     if (error) {
-      console.error(JSON.stringify(error, null, 2));
+      toast.error('Sign-in failed', clerkErrorMessage(error));
       return;
     }
 
@@ -75,27 +75,30 @@ export function SignInScreen() {
       if (emailCodeFactor) {
         const codeResult = await signIn.mfa.sendEmailCode();
         if (codeResult.error) {
-          console.error(JSON.stringify(codeResult.error, null, 2));
+          toast.error('Could not send code', clerkErrorMessage(codeResult.error));
+        } else {
+          toast.info('Verification sent', 'Check your inbox for the code.');
         }
       }
       return;
     }
 
     if (signIn.status === 'needs_second_factor') {
-      console.log(
-        'A second factor is required. Configure an email code factor to finish this flow in-app.',
+      toast.info(
+        'Second factor required',
+        'Configure an email code factor in Clerk to finish this flow.',
       );
       return;
     }
 
-    console.error('Sign-in attempt not complete:', signIn);
+    toast.error('Sign-in incomplete', 'Please try again.');
   }
 
   async function handleVerify() {
     const { error } = await signIn.mfa.verifyEmailCode({ code });
 
     if (error) {
-      console.error(JSON.stringify(error, null, 2));
+      toast.error('Verification failed', clerkErrorMessage(error));
       return;
     }
 
@@ -104,11 +107,10 @@ export function SignInScreen() {
       return;
     }
 
-    console.error('Sign-in attempt not complete:', signIn);
+    toast.error('Sign-in incomplete', 'Please try again.');
   }
 
   const isSubmitting = fetchStatus === 'fetching';
-  const globalError = errors.global?.[0]?.message ?? null;
 
   const inputStyle = [
     styles.input,
@@ -142,8 +144,6 @@ export function SignInScreen() {
           {errors.fields.code && (
             <ThemedText style={styles.error}>{errors.fields.code.message}</ThemedText>
           )}
-
-          {globalError && <ThemedText style={styles.error}>{globalError}</ThemedText>}
 
           <PrimaryButton
             disabled={!code || isSubmitting}
@@ -216,8 +216,6 @@ export function SignInScreen() {
           {errors.fields.password && (
             <ThemedText style={styles.error}>{errors.fields.password.message}</ThemedText>
           )}
-
-          {globalError && <ThemedText style={styles.error}>{globalError}</ThemedText>}
 
           <PrimaryButton
             disabled={!emailAddress || !password || isSubmitting}

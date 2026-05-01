@@ -3,6 +3,7 @@ import { tokenCache } from '@clerk/expo/token-cache';
 import { ConvexProviderWithClerk } from 'convex/react-clerk';
 import type { ReactNode } from 'react';
 
+import { ToastProvider } from '@/components/toast';
 import { env } from '@/config/env';
 import { convex } from '@/lib/convex';
 
@@ -14,7 +15,7 @@ export function AppProviders({ children }: AppProvidersProps) {
   return (
     <ClerkProvider publishableKey={env.clerkPublishableKey} tokenCache={tokenCache}>
       <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
-        {children}
+        <ToastProvider>{children}</ToastProvider>
       </ConvexProviderWithClerk>
     </ClerkProvider>
   );

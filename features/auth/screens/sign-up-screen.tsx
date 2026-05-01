@@ -1,8 +1,10 @@
 import { useAuth, useSignUp } from '@clerk/expo';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Link, useRouter } from 'expo-router';
 import React from 'react';
 import {
+  Image,
   Pressable,
   StyleSheet,
   TextInput,
@@ -11,6 +13,7 @@ import {
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { useToast } from '@/components/toast';
 import { darkTheme, lightTheme } from '@/constants/theme';
 import { ROUTES } from '@/lib/routes';
 
@@ -20,26 +23,69 @@ import {
   SocialButton,
   SocialDivider,
 } from '../components/social-button';
+import { clerkErrorMessage } from '../lib/clerk-error';
+import { PendingAvatar } from '../lib/pending-avatar';
 
 export function SignUpScreen() {
   const { signUp, errors, fetchStatus } = useSignUp();
   const { isSignedIn } = useAuth();
   const router = useRouter();
+  const toast = useToast();
   const isDark = useColorScheme() === 'dark';
   const palette = isDark ? darkTheme : lightTheme;
 
+  const [firstName, setFirstName] = React.useState('');
+  const [lastName, setLastName] = React.useState('');
   const [emailAddress, setEmailAddress] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [code, setCode] = React.useState('');
+  const [avatarPreview, setAvatarPreview] = React.useState<string | null>(null);
+  const [avatarDataUrl, setAvatarDataUrl] = React.useState<string | null>(null);
+
+  async function pickAvatar() {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        toast.error(
+          'Permission needed',
+          'We need access to your photos to set your profile picture.',
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const asset = result.assets[0];
+      if (!asset.base64) {
+        toast.error('Could not load photo', 'Try a different image.');
+        return;
+      }
+
+      const mime = asset.mimeType ?? 'image/jpeg';
+      setAvatarDataUrl(`data:${mime};base64,${asset.base64}`);
+      setAvatarPreview(asset.uri);
+    } catch (err) {
+      toast.error('Could not pick photo', clerkErrorMessage(err));
+    }
+  }
 
   async function finalizeSignUp() {
+    if (avatarDataUrl) {
+      PendingAvatar.set(avatarDataUrl);
+    }
+
     const { error } = await signUp.finalize({
       navigate: ({ session }) => {
         if (session.currentTask) {
-          console.log(
-            'Complete the pending Clerk session task before continuing.',
-            session.currentTask,
-          );
+          toast.info('Action required', 'Finish the pending Clerk session task to continue.');
           return;
         }
 
@@ -48,32 +94,40 @@ export function SignUpScreen() {
     });
 
     if (error) {
-      console.error(JSON.stringify(error, null, 2));
+      toast.error('Sign-up failed', clerkErrorMessage(error));
     }
   }
 
   async function handleSubmit() {
+    const trimmedFirst = firstName.trim();
+    const trimmedLast = lastName.trim();
+
     const { error } = await signUp.password({
       emailAddress,
       password,
+      ...(trimmedFirst && { firstName: trimmedFirst }),
+      ...(trimmedLast && { lastName: trimmedLast }),
     });
 
     if (error) {
-      console.error(JSON.stringify(error, null, 2));
+      toast.error('Sign-up failed', clerkErrorMessage(error));
       return;
     }
 
     const verificationResult = await signUp.verifications.sendEmailCode();
     if (verificationResult.error) {
-      console.error(JSON.stringify(verificationResult.error, null, 2));
+      toast.error('Could not send code', clerkErrorMessage(verificationResult.error));
+      return;
     }
+
+    toast.info('Verification sent', 'Check your inbox for the code.');
   }
 
   async function handleVerify() {
     const { error } = await signUp.verifications.verifyEmailCode({ code });
 
     if (error) {
-      console.error(JSON.stringify(error, null, 2));
+      toast.error('Verification failed', clerkErrorMessage(error));
       return;
     }
 
@@ -82,7 +136,7 @@ export function SignUpScreen() {
       return;
     }
 
-    console.error('Sign-up attempt not complete:', signUp);
+    toast.error('Sign-up incomplete', 'Please try again.');
   }
 
   if (signUp.status === 'complete' || isSignedIn) {
@@ -95,7 +149,6 @@ export function SignUpScreen() {
     signUp.missingFields.length === 0;
 
   const isSubmitting = fetchStatus === 'fetching';
-  const globalError = errors.global?.[0]?.message ?? null;
 
   const inputStyle = [
     styles.input,
@@ -134,8 +187,6 @@ export function SignUpScreen() {
             <ThemedText style={styles.error}>{errors.fields.code.message}</ThemedText>
           )}
 
-          {globalError && <ThemedText style={styles.error}>{globalError}</ThemedText>}
-
           <PrimaryButton
             disabled={!code || isSubmitting}
             label="Verify and continue"
@@ -168,6 +219,40 @@ export function SignUpScreen() {
 
           <SocialDivider label="or sign up with email" />
 
+          <AvatarPicker
+            preview={avatarPreview}
+            onPick={() => void pickAvatar()}
+            palette={palette}
+            isDark={isDark}
+          />
+
+          <View style={styles.nameRow}>
+            <View style={styles.nameField}>
+              <ThemedText style={[styles.label, { color: palette.text }]}>First name</ThemedText>
+              <TextInput
+                style={inputStyle}
+                value={firstName}
+                placeholder="Optional"
+                placeholderTextColor={placeholderColor}
+                onChangeText={setFirstName}
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
+            </View>
+            <View style={styles.nameField}>
+              <ThemedText style={[styles.label, { color: palette.text }]}>Last name</ThemedText>
+              <TextInput
+                style={inputStyle}
+                value={lastName}
+                placeholder="Optional"
+                placeholderTextColor={placeholderColor}
+                onChangeText={setLastName}
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
+            </View>
+          </View>
+
           <ThemedText style={[styles.label, { color: palette.text }]}>Email address</ThemedText>
           <TextInput
             style={inputStyle}
@@ -196,8 +281,6 @@ export function SignUpScreen() {
             <ThemedText style={styles.error}>{errors.fields.password.message}</ThemedText>
           )}
 
-          {globalError && <ThemedText style={styles.error}>{globalError}</ThemedText>}
-
           <PrimaryButton
             disabled={!emailAddress || !password || isSubmitting}
             label="Create account"
@@ -213,6 +296,47 @@ export function SignUpScreen() {
         </Link>
       </View>
     </AuthScreenShell>
+  );
+}
+
+function AvatarPicker({
+  preview,
+  onPick,
+  palette,
+  isDark,
+}: {
+  preview: string | null;
+  onPick: () => void;
+  palette: typeof lightTheme | typeof darkTheme;
+  isDark: boolean;
+}) {
+  return (
+    <View style={styles.avatarRow}>
+      <Pressable
+        onPress={onPick}
+        style={({ pressed }) => [
+          styles.avatarCircle,
+          {
+            backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.7)',
+            borderColor: palette.border,
+          },
+          pressed && styles.buttonPressed,
+        ]}>
+        {preview ? (
+          <Image source={{ uri: preview }} style={styles.avatarImage} />
+        ) : (
+          <ThemedText style={[styles.avatarPlus, { color: palette.primary }]}>+</ThemedText>
+        )}
+      </Pressable>
+      <View style={styles.avatarLabel}>
+        <ThemedText style={[styles.avatarTitle, { color: palette.text }]}>
+          Profile photo
+        </ThemedText>
+        <ThemedText style={{ color: palette.textMuted, fontSize: 12 }}>
+          {preview ? 'Tap to change' : 'Optional — tap to add'}
+        </ThemedText>
+      </View>
+    </View>
   );
 }
 
@@ -253,6 +377,46 @@ function PrimaryButton({
 const styles = StyleSheet.create({
   socialStack: {
     gap: 10,
+  },
+  avatarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginTop: 4,
+  },
+  avatarCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 64,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarPlus: {
+    fontSize: 28,
+    fontWeight: '300',
+    lineHeight: 30,
+  },
+  avatarLabel: {
+    flex: 1,
+    gap: 2,
+  },
+  avatarTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  nameField: {
+    flex: 1,
+    gap: 6,
   },
   label: {
     fontSize: 13,

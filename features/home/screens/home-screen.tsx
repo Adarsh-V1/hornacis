@@ -13,7 +13,10 @@ import {
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { useToast } from '@/components/toast';
 import { darkTheme, Fonts, lightTheme } from '@/constants/theme';
+import { clerkErrorMessage } from '@/features/auth/lib/clerk-error';
+import { PendingAvatar } from '@/features/auth/lib/pending-avatar';
 import { currentUserIdentityQuery } from '@/lib/convex';
 import { ROUTES } from '@/lib/routes';
 
@@ -21,6 +24,7 @@ export function HomeScreen() {
   const { signOut } = useClerk();
   const { user } = useUser();
   const router = useRouter();
+  const toast = useToast();
   const isDark = useColorScheme() === 'dark';
   const palette = isDark ? darkTheme : lightTheme;
 
@@ -29,6 +33,17 @@ export function HomeScreen() {
 
   const emailAddress =
     user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses[0]?.emailAddress ?? 'Unknown';
+
+  React.useEffect(() => {
+    if (!user || !PendingAvatar.has()) return;
+    const file = PendingAvatar.consume();
+    if (!file) return;
+
+    user
+      .setProfileImage({ file })
+      .then(() => toast.success('Profile photo set'))
+      .catch((err) => toast.error('Could not save photo', clerkErrorMessage(err)));
+  }, [user, toast]);
 
   async function handleSignOut() {
     try {
